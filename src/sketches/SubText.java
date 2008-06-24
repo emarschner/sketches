@@ -4,6 +4,7 @@ import processing.core.PApplet;
 import processing.core.PFont;
 
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.FileNotFoundException;
@@ -16,20 +17,36 @@ public class SubText extends PApplet {
 	private static final int LEFT = -1;
 	private static final int RIGHT = 1;
 	
+	private final int softBlue = (new PApplet()).color(42, 69, 71);
+	private final int lightTan = (new PApplet()).color(201, 193, 165);
+	
+	private int backgroundColor;
+	private int fillColor;
+	
 	public PFont subFont;
 	
 	public int maxFontSize = 96;
-	public int minFontSize = 12;
+	public int minFontSize = 32;
 	public int fontSize = minFontSize;
 	public float fontWidthRatio = 0.75f;
 	public ArrayBlockingQueue<Word> words = new ArrayBlockingQueue<Word>(MAX_WORDS);
 	
+	private void resetBackground() {
+		background(red(this.backgroundColor), green(this.backgroundColor), blue(this.backgroundColor));
+	}
+	
+	private void resetFill() {
+		fill(red(this.fillColor), green(this.fillColor), blue(this.fillColor));
+	}
+	
 	public void setup() {
+		
+		this.backgroundColor = this.lightTan;
+		this.fillColor = this.softBlue;
+		
 		size(800, 800, OPENGL);
-		//background(140, 134, 39);
-		background(0);
-		//fill(64, 60, 1);
-		fill(255);
+		resetBackground();
+		resetFill();
 		
 		subFont = loadFont("LiberationMono-Bold-128.vlw");
 		textFont(subFont, fontSize);
@@ -37,10 +54,9 @@ public class SubText extends PApplet {
 	}
 
 	public void draw() {
-		//background(140, 134, 39);
-		background(0);
+		resetBackground();
 		try {
-			words.add(new MarqueeWord("POSITIVITY", new MarqueeWord("NEGATIVITY")));
+			words.add(new MarqueeWord("1337", new MarqueeWord("LEET"), fontSize / 4.0d));
 		} catch (IllegalStateException e) {}
 		for (Word word : words) {
 			word.draw();
@@ -60,8 +76,10 @@ public class SubText extends PApplet {
 		private int height;
 		
 		private static final char MASK_MARKER = '#';
-		private String[] characters = { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z" };
 		
+		private static final String MASK_WIDTH_ERROR = "Each line in character's mask must not be longer than maximum width!";
+		private static final String MASK_MISSING_ERROR = "The mask for a character is missing!";
+				
 		public MonoFont(BufferedReader fontMaskSource) {
 			loadMask(fontMaskSource);
 		}
@@ -69,11 +87,11 @@ public class SubText extends PApplet {
 		private void loadMask(BufferedReader fontMaskSource) {
 			int lineCount = 0;
 			String line;
-			int characterCount = -1;
+			LinkedList<String> characters = new LinkedList<String>();
 			int characterRow = 0;
 			boolean[][] characterMatrix = null;
 			this.fontMask = new HashMap<String, boolean[][]>();
-			
+
 			try {
 				while ((line = fontMaskSource.readLine()) != null) {
 					++lineCount;
@@ -81,15 +99,17 @@ public class SubText extends PApplet {
 						this.width = line.length();
 					} else if (lineCount == 2) {
 						this.height = line.length();
-					} else if (line.length() == 0) {
-						if (characterMatrix != null) {
-							fontMask.put(characters[characterCount], characterMatrix);
+					} else if (line.length() > 0 && characters.isEmpty()) {
+						// Non-empty line + no current characters = starting new character mask
+						for (int i = 0; i < line.length(); ++i) {
+							characters.add(line.substring(i, i + 1));
 						}
-						++characterCount;
-						if (characterCount >= characters.length) break;
 						characterMatrix = new boolean[this.height][this.width];
 						characterRow = 0;
-					} else {
+					} else if (!characters.isEmpty()) {
+						assert line.length() <= this.width : MASK_WIDTH_ERROR + " on line: " + lineCount;
+						
+						// Scan each character mask's line for 'on/off' locations
 						for (int column = 0; column < line.length(); ++column) {
 							boolean cellValue;
 							if (line.charAt(column) == MASK_MARKER) cellValue = true;
@@ -97,10 +117,31 @@ public class SubText extends PApplet {
 							characterMatrix[characterRow][column] = cellValue;
 						}
 						++characterRow;
+						
+						if (characterRow >= this.height) {
+							// Save last characters' matrix
+							if (characterMatrix != null) {
+								for (String character : characters) {
+									fontMask.put(character, characterMatrix);
+								}
+							}
+							
+							// Reset for next character mask
+							characters.clear();
+							characterMatrix = null;
+						}
+					}
+				}
+				if (!characters.isEmpty()) {
+					// Save left-over matrix, if any
+					if (characterMatrix != null) {
+						for (String character : characters) {
+							fontMask.put(character, characterMatrix);
+						}
 					}
 				}
 			} catch (IOException e) {
-				System.out.print(" ! I/O ERROR ! ");
+				e.printStackTrace();
 			}
 		}
 		
@@ -112,6 +153,7 @@ public class SubText extends PApplet {
 		
 		public void draw(String major, String minor) {
 			boolean[][] characterMatrix = fontMask.get(major);
+			assert characterMatrix != null : MASK_MISSING_ERROR + " character: " + major;
 			for (int row = 0; row < this.height; ++row) {
 				for (int column = 0; column < this.width; ++column) {
 					if (characterMatrix[row][column]) {
