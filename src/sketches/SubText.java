@@ -4,21 +4,26 @@ import processing.core.PApplet;
 import processing.core.PFont;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.Random;
+
+import java.util.concurrent.ArrayBlockingQueue;
+
+import java.io.File;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.concurrent.ArrayBlockingQueue;
 
 public class SubText extends PApplet {
 	
-	private static final int MAX_WORDS = 2;
+	private static final int MAX_WORDS = 5;
 	private static final short LEFT = -1;
 	private static final short RIGHT = 1;
 
-	private static final int CANVAS_WIDTH = 600;
-	private static final int CANVAS_HEIGHT = 800;
+	private static final int CANVAS_WIDTH = 640;
+	private static final int CANVAS_HEIGHT = 480;
 	
 	private final int softBlue = (new PApplet()).color(42, 69, 71);
 	private final int lightTan = (new PApplet()).color(201, 193, 165);
@@ -26,10 +31,13 @@ public class SubText extends PApplet {
 	private int backgroundColor;
 	private int fillColor;
 	
+	private ArrayList<File> antonymFiles = new ArrayList<File>();
+	private Random generator = new Random();
+	
 	public PFont subFont;
 	
-	public int maxSubFontSize = CANVAS_HEIGHT / 18;
-	public int minSubFontSize = CANVAS_HEIGHT / 36;
+	public int maxSubFontSize = CANVAS_HEIGHT / 32;
+	public int minSubFontSize = CANVAS_HEIGHT / 96;
 	public int fontSize = minSubFontSize;
 	public float fontWidthRatio = 0.75f;
 	
@@ -44,9 +52,10 @@ public class SubText extends PApplet {
 	}
 	
 	public void setup() {
-		
 		this.backgroundColor = this.lightTan;
 		this.fillColor = this.softBlue;
+		
+		getAllFilesUnderDirectory("data/congruent_antonyms", this.antonymFiles);
 		
 		size(CANVAS_WIDTH, CANVAS_HEIGHT, OPENGL);
 		frameRate(30);
@@ -62,19 +71,40 @@ public class SubText extends PApplet {
 		resetBackground();
 		resetFill();
 		try {
-			MarqueeWord word;
+			MarqueeWord word1, word2;
+			short direction = LEFT;
 			while (true) {
-				word = new MarqueeWord("pro", fontSize, new MarqueeWord("CON"), fontSize / 4.0d);
-				word.setDirection(LEFT);
-				word.setX(this.width);
-				word.setY(((double)this.height) * 0.66);
-				words.add(word);
+				File wordFile = getRandomWordFile();
+				String majorWord = wordFile.getName().toUpperCase();
+				String minorWord = majorWord;
+				try {
+					minorWord = (new BufferedReader(new FileReader(wordFile))).readLine().toUpperCase();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				int randomFontSize = generator.nextInt(maxSubFontSize - minSubFontSize) + minSubFontSize;
+				
+				word1 = new MarqueeWord(majorWord, randomFontSize, (randomFontSize * randomFontSize) / (32));
+				word2 = new MarqueeWord(minorWord, randomFontSize, (randomFontSize * randomFontSize) / (32));
+				word1.setSubWord(word2);
+				word2.setSubWord(word1);
 
-				word = new MarqueeWord("CON", fontSize / 2, new MarqueeWord("pro"), fontSize / 12.0d);
-				word.setDirection(RIGHT);
-				word.setX(-word.getWidth());
-				word.setY(((double)this.height) * 0.33);
-				words.add(word);
+				word1.setDirection(direction);
+				word2.setDirection(direction);
+				if (direction == LEFT) {
+					word1.setX(this.width);
+					word1.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
+					word2.setX(this.width);
+					word2.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
+				} else if (direction == RIGHT) {
+					word1.setX(-word1.getWidth());
+					word1.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
+					word2.setX(-word1.getWidth());
+					word2.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
+				}
+				this.words.add(word1);
+				
+				//direction *= -1;
 			}
 		} catch (IllegalStateException e) {}
 		for (Word word : words) {
@@ -82,17 +112,35 @@ public class SubText extends PApplet {
 		}
 	}
 	
+	private void getAllFilesUnderDirectory(String directoryPath, ArrayList<File> files) {
+		File directory = new File(directoryPath);
+		assert directory.exists() && directory.isDirectory() : "The getAllFilesUnderDirectory function must be given the name of an existing directory!";
+		for (File file : directory.listFiles()) {
+			if (file.isFile()) {
+				files.add(file);
+			} else if (file.isDirectory()) {
+				getAllFilesUnderDirectory(file.getPath(), files);
+			}
+		}
+	}
+	
+	private File getRandomWordFile() {
+		return this.antonymFiles.get(generator.nextInt(this.antonymFiles.size() - 1));
+	}
+	
 	private interface SuperFont {
 		public boolean isMonospaced();
-		public int getWidth();
-		public int getHeight();
+		public int getColumns();
+		public int getRows();
+		public double getHeight();
+		public double getWidth();
 		public void draw(String major, String minor);
 	}
 	
 	private abstract class MonoFont implements SuperFont {
 		private HashMap<String, boolean[][]> fontMask;
-		private int width;
-		private int height;
+		private int columns;
+		private int rows;
 		
 		private int fontSize;
 		
@@ -118,18 +166,18 @@ public class SubText extends PApplet {
 				while ((line = fontMaskSource.readLine()) != null) {
 					++lineCount;
 					if (lineCount == 1) {
-						this.width = line.length();
+						this.columns = line.length();
 					} else if (lineCount == 2) {
-						this.height = line.length();
+						this.rows = line.length();
 					} else if (line.length() > 0 && characters.isEmpty()) {
 						// Non-empty line + no current characters = starting new character mask
 						for (int i = 0; i < line.length(); ++i) {
 							characters.add(line.substring(i, i + 1));
 						}
-						characterMatrix = new boolean[this.height][this.width];
+						characterMatrix = new boolean[this.rows][this.columns];
 						characterRow = 0;
 					} else if (!characters.isEmpty()) {
-						assert line.length() <= this.width : MASK_WIDTH_ERROR + " on line: " + lineCount;
+						assert line.length() <= this.columns : MASK_WIDTH_ERROR + " on line: " + lineCount;
 						
 						// Scan each character mask's line for 'on/off' locations
 						for (int column = 0; column < line.length(); ++column) {
@@ -140,7 +188,7 @@ public class SubText extends PApplet {
 						}
 						++characterRow;
 						
-						if (characterRow >= this.height) {
+						if (characterRow >= this.rows) {
 							// Save last characters' matrix
 							if (characterMatrix != null) {
 								for (String character : characters) {
@@ -169,9 +217,17 @@ public class SubText extends PApplet {
 		
 		public boolean isMonospaced() { return true; }
 		
-		public int getWidth() { return this.width; }
+		public int getColumns() { return this.columns; }
 		
-		public int getHeight() { return this.height; }
+		public int getRows() { return this.rows; }
+		
+		public double getWidth() {
+			return this.columns * this.fontSize * fontWidthRatio;
+		}
+		
+		public double getHeight() {
+			return this.rows * this.fontSize;
+		}
 		
 		public double getColumnOffset(int column) {
 			return column * this.fontSize * fontWidthRatio;
@@ -184,9 +240,9 @@ public class SubText extends PApplet {
 		public void draw(String major, String minor) {
 			boolean[][] characterMatrix = fontMask.get(major);
 			assert characterMatrix != null : MASK_MISSING_ERROR + " character: " + major;
-			for (int row = 0; row < this.height; ++row) {
+			for (int row = 0; row < this.rows; ++row) {
 				textFont(subFont, this.fontSize);
-				for (int column = 0; column < this.width; ++column) {
+				for (int column = 0; column < this.columns; ++column) {
 					if (characterMatrix[row][column]) {
 						text(minor, (int)this.getColumnOffset(column), (int)this.getRowOffset(row));
 					}
@@ -262,11 +318,15 @@ public class SubText extends PApplet {
 		}
 		
 		public double getWidth() {
-			return (this.length() * (this.wordFont.getWidth()) + 1) * fontWidthRatio * this.fontSize;
+			return this.length() * (this.wordFont.getColumns() + 1) * fontWidthRatio * this.fontSize;
+		}
+		
+		public double getHeight() {
+			return this.wordFont.getHeight();
 		}
 		
 		public double getCharacterOffset(int index) {
-			return index * (this.wordFont.getWidth() + 1) * fontWidthRatio * this.fontSize;
+			return index * (this.wordFont.getColumns() + 1) * fontWidthRatio * this.fontSize;
 		}
 		
 		public void draw() {
@@ -278,6 +338,11 @@ public class SubText extends PApplet {
 				} else if (this.getDirection() == RIGHT) {
 					this.setX(-this.getWidth());
 				}
+				this.setY(height * random(0f, (float)(height - this.getHeight()) / height));
+				
+				// swap major word
+				words.remove(this);
+				words.add(this.subWord);
 			} else {
 				// Adjust position accordingly
 				this.setX(this.getX() + this.getSpeed() * this.getDirection());
