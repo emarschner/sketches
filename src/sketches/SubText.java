@@ -3,12 +3,17 @@ package sketches;
 import processing.core.PApplet;
 import processing.core.PFont;
 
+import net.nexttext.Book;
+
+import flux.vertext.P5Extend;
+import flux.vertext.Vertext;
+
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.Random;
 
-import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import java.io.File;
 import java.io.BufferedReader;
@@ -17,31 +22,43 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 
 public class SubText extends PApplet {
+
+	private static final int CANVAS_WIDTH = 800;
+	private static final int CANVAS_HEIGHT = 600;
+	private static final int FRAME_RATE = 30;
+	
+	private final PApplet APP = this;
+	private static final PApplet HELPER_APP = new PApplet();
+	private static final Random RANDOM = new Random();
 	
 	private static final int MAX_WORDS = 5;
 	private static final short LEFT = -1;
 	private static final short RIGHT = 1;
-
-	private static final int CANVAS_WIDTH = 640;
-	private static final int CANVAS_HEIGHT = 480;
 	
-	private final int softBlue = (new PApplet()).color(42, 69, 71);
-	private final int lightTan = (new PApplet()).color(201, 193, 165);
+	private static final class COLORS {
+		public static final int black = HELPER_APP.color(0, 0, 0);
+		public static final int white = HELPER_APP.color(255, 255, 255);
+		public static final int softBlue = HELPER_APP.color(42, 69, 71);
+		public static final int lightTan = HELPER_APP.color(201, 193, 165);
+	}
+	
+	private static final class FONTS {
+		public static final String liberationMonoBoldTTF = "LiberationMono-Bold.ttf";
+		public static final String liberationMonoBoldVLW = "LiberationMono-Bold-128.vlw";
+		public static final String liberationMonoBoldName = "Liberation Mono Bold";
+	}
 	
 	private int backgroundColor;
 	private int fillColor;
 	
-	private ArrayList<File> antonymFiles = new ArrayList<File>();
-	private Random generator = new Random();
-	
 	public PFont subFont;
-	
-	public int maxSubFontSize = CANVAS_HEIGHT / 32;
+	public int maxSubFontSize = CANVAS_HEIGHT / 48;
 	public int minSubFontSize = CANVAS_HEIGHT / 96;
 	public int fontSize = minSubFontSize;
 	public float fontWidthRatio = 0.75f;
 	
-	public ArrayBlockingQueue<Word> words = new ArrayBlockingQueue<Word>(MAX_WORDS);
+	private ArrayList<File> antonymFiles = new ArrayList<File>();	
+	public LinkedBlockingQueue<Word> activeWords = new LinkedBlockingQueue<Word>(MAX_WORDS);
 	
 	private void resetBackground() {
 		background(red(this.backgroundColor), green(this.backgroundColor), blue(this.backgroundColor));
@@ -52,62 +69,62 @@ public class SubText extends PApplet {
 	}
 	
 	public void setup() {
-		this.backgroundColor = this.lightTan;
-		this.fillColor = this.softBlue;
-		
-		getAllFilesUnderDirectory("data/congruent_antonyms", this.antonymFiles);
-		
 		size(CANVAS_WIDTH, CANVAS_HEIGHT, OPENGL);
-		frameRate(30);
+		frameRate(FRAME_RATE);
+		
+		subFont = loadFont(FONTS.liberationMonoBoldVLW);
+		textAlign(LEFT, TOP);
+
+		this.backgroundColor = COLORS.black;
+		this.fillColor = COLORS.white;
 		
 		resetBackground();
 		resetFill();
 		
-		subFont = loadFont("LiberationMono-Bold-128.vlw");
-		textAlign(LEFT, TOP);
+		P5Extend.register(APP);
+				
+		getAllFilesUnderDirectory("data/congruent_antonyms", this.antonymFiles);
 	}
 
 	public void draw() {
 		resetBackground();
 		resetFill();
 		try {
-			MarqueeWord word1, word2;
+			MarqueeWord majorWord;
 			short direction = LEFT;
-			while (true) {
-				File wordFile = getRandomWordFile();
-				String majorWord = wordFile.getName().toUpperCase();
-				String minorWord = majorWord;
+			while (activeWords.remainingCapacity() > 0) {
+				int randomFontSize = RANDOM.nextInt(maxSubFontSize - minSubFontSize) + minSubFontSize;
+				
+				File wordFile = this.getRandomWordFile();
+				String majorWordText = wordFile.getName().toUpperCase();
+				
+				majorWord = new MarqueeWord(majorWordText, randomFontSize, this.getSpeedFromFontSize(randomFontSize));
+				majorWord.initialize(direction);
+				
+				String minorWordText;
+				BufferedReader wordReader = null;
 				try {
-					minorWord = (new BufferedReader(new FileReader(wordFile))).readLine().toUpperCase();
+					wordReader = new BufferedReader(new FileReader(wordFile));
+					MarqueeWord minorWord = null;
+					while ((minorWordText = wordReader.readLine()) != null) {
+						minorWordText = minorWordText.toUpperCase();
+						minorWord = new MarqueeWord(minorWordText, randomFontSize, this.getSpeedFromFontSize(randomFontSize));
+						minorWord.initialize(direction);
+						
+						minorWord.addSubWord(majorWord);
+						majorWord.addSubWord(minorWord);
+					}
 				} catch (IOException e) {
 					e.printStackTrace();
 				}
-				int randomFontSize = generator.nextInt(maxSubFontSize - minSubFontSize) + minSubFontSize;
 				
-				word1 = new MarqueeWord(majorWord, randomFontSize, (randomFontSize * randomFontSize) / (32));
-				word2 = new MarqueeWord(minorWord, randomFontSize, (randomFontSize * randomFontSize) / (32));
-				word1.setSubWord(word2);
-				word2.setSubWord(word1);
-
-				word1.setDirection(direction);
-				word2.setDirection(direction);
-				if (direction == LEFT) {
-					word1.setX(this.width);
-					word1.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
-					word2.setX(this.width);
-					word2.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
-				} else if (direction == RIGHT) {
-					word1.setX(-word1.getWidth());
-					word1.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
-					word2.setX(-word1.getWidth());
-					word2.setY(((double)this.height) * random(0f, (float)(height - word1.getHeight()) / height));
-				}
-				this.words.add(word1);
+				this.activeWords.add(majorWord);
 				
-				//direction *= -1;
+				direction *= -1; // flip directions
 			}
 		} catch (IllegalStateException e) {}
-		for (Word word : words) {
+		
+		for (Word word : activeWords) {
 			word.draw();
 		}
 	}
@@ -125,7 +142,11 @@ public class SubText extends PApplet {
 	}
 	
 	private File getRandomWordFile() {
-		return this.antonymFiles.get(generator.nextInt(this.antonymFiles.size() - 1));
+		return this.antonymFiles.get(RANDOM.nextInt(this.antonymFiles.size() - 1));
+	}
+	
+	private double getSpeedFromFontSize(double fontSize) {
+		return (fontSize * fontSize) / 32d;
 	}
 	
 	private interface SuperFont {
@@ -144,6 +165,8 @@ public class SubText extends PApplet {
 		
 		private int fontSize;
 		
+		private Vertext vectorFont = null;
+		
 		private static final char MASK_MARKER = '#';
 		
 		private static final String MASK_WIDTH_ERROR = "Each line in character's mask must not be longer than maximum width!";
@@ -152,6 +175,7 @@ public class SubText extends PApplet {
 		public MonoFont(BufferedReader fontMaskSource, int fontSize) {
 			loadMask(fontMaskSource);
 			this.fontSize = fontSize;
+			this.vectorFont = new Vertext(FONTS.liberationMonoBoldName, fontSize, fillColor);
 		}
 		
 		private void loadMask(BufferedReader fontMaskSource) {
@@ -244,7 +268,11 @@ public class SubText extends PApplet {
 				textFont(subFont, this.fontSize);
 				for (int column = 0; column < this.columns; ++column) {
 					if (characterMatrix[row][column]) {
-						text(minor, (int)this.getColumnOffset(column), (int)this.getRowOffset(row));
+						if (mousePressed) {
+							text(minor, (int)this.getColumnOffset(column), (int)this.getRowOffset(row));
+						} else {
+							vectorFont.text(minor, (int)this.getColumnOffset(column), (int)this.getRowOffset(row));
+						}
 					}
 				}
 			}
@@ -261,15 +289,17 @@ public class SubText extends PApplet {
 	
 	private interface Word {
 		public String getText();
-		public void setSubWord(Word subWord);
-		public Word getSubWord();
+		public void addSubWord(Word subWord);
+		public Word nextSubWord();
 		public long length();
 		public void draw();
 	}
 	
 	private class MarqueeWord implements Word {
 		private String text = null;
-		private Word subWord = null;
+		private LinkedBlockingQueue<Word> subWords = new LinkedBlockingQueue<Word>();
+		
+		//private Book book = new Book(APP);
 		
 		private SuperFont wordFont;
 		private int fontSize;
@@ -294,13 +324,14 @@ public class SubText extends PApplet {
 			} catch (FileNotFoundException e) {
 				throw new AssertionError(FONT_ERROR_MSG);
 			}
+			//this.book.textFont(this.book.loadFont(FONTS.liberationMonoBoldTTF), fontSize);
 			this.setText(text);
 		}
 		
 		public MarqueeWord(String text, int fontSize, Word subWord) {
 			this(text, fontSize);
 			assert this.text.length() == subWord.length() : LENGTH_ERROR_MSG;
-			this.setSubWord(subWord);
+			this.addSubWord(subWord);
 		}
 		
 		public MarqueeWord(String text, int fontSize, double speed) {
@@ -311,6 +342,16 @@ public class SubText extends PApplet {
 		public MarqueeWord(String text, int fontSize, Word subWord, double speed) {
 			this(text, fontSize, subWord);
 			this.setSpeed(speed);
+		}
+		
+		public void initialize(short direction) {
+			this.setDirection(direction);
+			if (direction == LEFT) {
+				this.setX(width);
+			} else if (direction == RIGHT) {
+				this.setX(-this.getWidth());
+			}
+			this.setY(((double)height) * random(0f, (float)(height - this.getHeight()) / height));
 		}
 		
 		public long length() {
@@ -329,31 +370,34 @@ public class SubText extends PApplet {
 			return index * (this.wordFont.getColumns() + 1) * fontWidthRatio * this.fontSize;
 		}
 		
+		public boolean isVisible() {
+			if (this.getX() > width || this.getX() < -this.getWidth()) {
+				return false;
+			}
+			return true;
+		}
+		
 		public void draw() {
-			assert this.subWord != null : SUB_WORD_NULL_MSG;
+			assert !this.subWords.isEmpty() : SUB_WORD_NULL_MSG;
 			if (!this.isVisible()) {
 				// Reset position and don't draw
-				if (this.getDirection() == LEFT) {
-					this.setX(width);
-				} else if (this.getDirection() == RIGHT) {
-					this.setX(-this.getWidth());
-				}
-				this.setY(height * random(0f, (float)(height - this.getHeight()) / height));
+				this.initialize(this.getDirection());
 				
-				// swap major word
-				words.remove(this);
-				words.add(this.subWord);
+				// Swap out for next subWord in line
+				activeWords.remove(this);
+				activeWords.add(this.nextSubWord());
 			} else {
 				// Adjust position accordingly
 				this.setX(this.getX() + this.getSpeed() * this.getDirection());
 				
 				// ...and draw each character
 				for (int i = 0; i < this.getText().length(); ++i) {
+					String subWordText = this.subWords.peek().getText();
 					pushMatrix();
 					{
 						translate((float)(this.getX() + getCharacterOffset(i)), (float)this.getY());
 						String majorCharacter = this.getText().substring(i, i + 1);
-						String minorCharacter = this.getSubWord().getText().substring(i, i + 1);
+						String minorCharacter = subWordText.substring(i, i + 1);
 						wordFont.draw(majorCharacter, minorCharacter);
 					}
 					popMatrix();
@@ -399,24 +443,25 @@ public class SubText extends PApplet {
 		}
 		
 		public void setText(String text) {
-			if (subWord != null) assert text.length() == subWord.length() : LENGTH_ERROR_MSG;
+			if (subWords.peek() != null) assert text.length() == subWords.peek().length() : LENGTH_ERROR_MSG;
 			this.text = text;
 		}
 		
-		public void setSubWord(Word subWord) {
+		public void addSubWord(Word subWord) {
 			assert this.text.length() == subWord.length() : LENGTH_ERROR_MSG;
-			this.subWord = subWord;
+			subWords.add(subWord);
 		}
 		
-		public Word getSubWord() {
-			return this.subWord;
-		}
-		
-		public boolean isVisible() {
-			if (this.getX() > width || this.getX() < -this.getWidth()) {
-				return false;
+		public Word nextSubWord() {
+			if (this.subWords.size() > 1) {
+				// Move head to tail, then return moved word
+				Word nextSubWord = subWords.remove();
+				subWords.add(nextSubWord);
+				return nextSubWord;
 			}
-			return true;
+			
+			// 1 queue entry = don't bother with head -> tail move
+			return subWords.peek();
 		}
 	}
 
